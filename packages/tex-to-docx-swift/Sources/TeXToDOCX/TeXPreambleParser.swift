@@ -241,8 +241,6 @@ struct TeXPreambleParser {
         while let range = source.range(of: "\\titleformat", range: searchStart..<source.endIndex) {
             searchStart = range.upperBound
 
-            let remaining = source[range.lowerBound...]
-
             // Extract brace groups: \titleformat{level}[block]{fmt}{num}{indent}{wrapper}
             var groups: [String] = []
             var pos = range.upperBound

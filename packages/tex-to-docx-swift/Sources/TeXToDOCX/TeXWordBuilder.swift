@@ -322,14 +322,16 @@ struct TeXWordBuilder {
         let run1 = Run(text: line1, properties: runProps)
         var para1 = Paragraph(runs: [run1])
         para1.properties.alignment = .center
-        para1.properties.spacing = Spacing(before: 4000, after: 240)
+        para1.properties.spacing = Spacing(before: 4000, after: line2.isEmpty ? 4000 : 240)
         document.appendParagraph(para1)
 
-        let run2 = Run(text: line2, properties: runProps)
-        var para2 = Paragraph(runs: [run2])
-        para2.properties.alignment = .center
-        para2.properties.spacing = Spacing(before: 0, after: 4000)
-        document.appendParagraph(para2)
+        if !line2.isEmpty {
+            let run2 = Run(text: line2, properties: runProps)
+            var para2 = Paragraph(runs: [run2])
+            para2.properties.alignment = .center
+            para2.properties.spacing = Spacing(before: 0, after: 4000)
+            document.appendParagraph(para2)
+        }
     }
 
     private mutating func emitZhaiYao(_ content: String) {
@@ -437,8 +439,7 @@ struct TeXWordBuilder {
             if let (content, len) = extractBraceContent("\\kw", from: fromBackslash) {
                 // From commands.tex: \color{keywordBlue}
                 let c = color("keywordBlue", fallback: DefaultColor.keywordBlue)
-                var kwProps = RunProperties(bold: true, color: c)
-                // kw doesn't specify font, inherits main font
+                let kwProps = RunProperties(bold: true, color: c)
                 runs.append(Run(text: content, properties: kwProps))
                 remaining = remaining[remaining.index(backslashIndex, offsetBy: len)...]
             } else if let (content, len) = extractBraceContent("\\tc", from: fromBackslash) {
@@ -453,6 +454,37 @@ struct TeXWordBuilder {
             } else if let (content, len) = extractBraceContent("\\textit", from: fromBackslash) {
                 runs.append(Run(text: content, properties: RunProperties(italic: true)))
                 remaining = remaining[remaining.index(backslashIndex, offsetBy: len)...]
+            } else if let (colorName, len) = extractBraceContent("\\color", from: fromBackslash) {
+                // \color{name} applies to following text — resolve color but don't emit the name
+                let resolvedColor = config.colors.resolve(colorName)
+                remaining = remaining[remaining.index(backslashIndex, offsetBy: len)...]
+                // Collect text until end of group or line, apply color
+                if !remaining.isEmpty {
+                    // Find the extent of colored text (until next command or end)
+                    var coloredText = ""
+                    while !remaining.isEmpty {
+                        guard let nextBS = remaining.firstIndex(of: "\\") else {
+                            coloredText += cleanLaTeX(String(remaining))
+                            remaining = remaining[remaining.endIndex...]
+                            break
+                        }
+                        coloredText += cleanLaTeX(String(remaining[remaining.startIndex..<nextBS]))
+                        break
+                    }
+                    if !coloredText.isEmpty {
+                        var colorProps = RunProperties()
+                        if let hex = resolvedColor { colorProps.color = hex }
+                        runs.append(Run(text: coloredText, properties: colorProps))
+                    }
+                }
+            } else if let (_, len) = extractBraceContent("\\fontsize", from: fromBackslash) {
+                // Skip \fontsize{X}{Y} — formatting only, no text content
+                remaining = remaining[remaining.index(backslashIndex, offsetBy: len)...]
+                // Also skip the second brace group if present
+                let afterFirst = String(remaining)
+                if afterFirst.hasPrefix("{"), let (_, len2) = extractBraceContentRaw(from: afterFirst) {
+                    remaining = remaining[remaining.index(remaining.startIndex, offsetBy: len2)...]
+                }
             } else {
                 let afterBackslash = remaining.index(after: backslashIndex)
                 if afterBackslash < remaining.endIndex {
